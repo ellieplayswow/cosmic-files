@@ -23,6 +23,8 @@ use tab::Location;
 pub mod tab;
 mod thumbnailer;
 
+pub mod shred;
+
 pub(crate) fn err_str<T: ToString>(err: T) -> String {
     err.to_string()
 }

@@ -16,11 +16,13 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use std::error::Error;
+use std::fs::OpenOptions;
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 use walkdir::WalkDir;
 use zip::result::ZipError;
 use zip::AesMode::Aes256;
-
+use crate::shred::Shreddable;
 pub use self::controller::{Controller, ControllerState};
 pub mod controller;
 
@@ -459,9 +461,12 @@ pub enum Operation {
     /// Move items to the trash
     Delete {
         paths: Vec<PathBuf>,
+        shred: bool
     },
     /// Empty the trash
-    EmptyTrash,
+    EmptyTrash {
+        shred: bool
+    },
     /// Uncompress files
     Extract {
         paths: Vec<PathBuf>,
@@ -490,7 +495,7 @@ pub enum Operation {
     /// Set executable and launch
     SetExecutableAndLaunch {
         path: PathBuf,
-    },
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -543,14 +548,26 @@ impl Operation {
                 to = file_name(to),
                 progress = progress()
             ),
-            Self::Delete { paths } => fl!(
-                "moving",
-                items = paths.len(),
-                from = paths_parent_name(paths),
-                to = fl!("trash"),
-                progress = progress()
-            ),
-            Self::EmptyTrash => fl!("emptying-trash", progress = progress()),
+            Self::Delete { paths, shred } => {
+                if *shred {
+                    fl!(
+                        "shredding",
+                        items = paths.len(),
+                        from = paths_parent_name(paths),
+                        progress = progress()
+                    )
+                }
+                else {
+                    fl!(
+                        "moving",
+                        items = paths.len(),
+                        from = paths_parent_name(paths),
+                        to = fl!("trash"),
+                        progress = progress()
+                    )
+                }
+            },
+            Self::EmptyTrash { shred } => fl!("emptying-trash", progress = progress()),
             Self::Extract {
                 paths,
                 to,
@@ -603,13 +620,24 @@ impl Operation {
                 from = paths_parent_name(paths),
                 to = file_name(to)
             ),
-            Self::Delete { paths } => fl!(
-                "moved",
-                items = paths.len(),
-                from = paths_parent_name(paths),
-                to = fl!("trash")
-            ),
-            Self::EmptyTrash => fl!("emptied-trash"),
+            Self::Delete { paths, shred } => {
+                if *shred {
+                    fl!(
+                        "shredded",
+                        items = paths.len(),
+                        from = paths_parent_name(paths)
+                    )
+                }
+                else {
+                    fl!(
+                        "moved",
+                        items = paths.len(),
+                        from = paths_parent_name(paths),
+                        to = fl!("trash")
+                    )
+                }
+            },
+            Self::EmptyTrash { shred } => fl!("emptied-trash"),
             Self::Extract {
                 paths,
                 to,
@@ -650,7 +678,7 @@ impl Operation {
             Self::Compress { .. }
             | Self::Copy { .. }
             | Self::Delete { .. }
-            | Self::EmptyTrash
+            | Self::EmptyTrash { .. }
             | Self::Extract { .. }
             | Self::Move { .. }
             | Self::Restore { .. } => true,
@@ -831,22 +859,42 @@ impl Operation {
                 //.map_err(|e| e)?
             }
             Self::Copy { paths, to } => copy_or_move(paths, to, false, msg_tx, controller).await,
-            Self::Delete { paths } => {
+            Self::Delete { paths, shred } => {
+                let mut paths = paths;
+                if shred {
+                    for path in paths.clone().iter() {
+                        if path.is_dir() {
+                            let new_paths_it = WalkDir::new(path).into_iter();
+                            for entry in new_paths_it.skip(1) {
+                                let entry = entry.map_err(OperationError::from_str)?;
+                                paths.push(entry.into_path());
+                            }
+                        }
+                    }
+                }
+
                 let total = paths.len();
                 for (i, path) in paths.into_iter().enumerate() {
                     controller.check().map_err(OperationError::from_str)?;
 
                     controller.set_progress((i as f32) / (total as f32));
 
-                    let _items_opt = tokio::task::spawn_blocking(|| trash::delete(path))
-                        .await
-                        .map_err(OperationError::from_str)?
-                        .map_err(OperationError::from_str)?;
-                    //TODO: items_opt allows for easy restore
+                    if shred {
+                        tokio::task::spawn_blocking(move || path.shred())
+                            .await
+                            .map_err(OperationError::from_str)??;
+                    }
+                    else {
+                        let _items_opt = tokio::task::spawn_blocking(|| trash::delete(path))
+                            .await
+                            .map_err(OperationError::from_str)?
+                            .map_err(OperationError::from_str)?;
+                        //TODO: items_opt allows for easy restore
+                    }
                 }
                 Ok(OperationSelection::default())
             }
-            Self::EmptyTrash => {
+            Self::EmptyTrash { shred } => {
                 #[cfg(any(
                     target_os = "windows",
                     all(
@@ -865,8 +913,15 @@ impl Operation {
 
                             controller.set_progress(i as f32 / count as f32);
 
-                            trash::os_limited::purge_all([item])
-                                .map_err(OperationError::from_str)?;
+                            if shred {
+                                item.shred()
+                                    .map_err(OperationError::from_str)?;
+                            }
+                            else {
+                                trash::os_limited::purge_all([item])
+                                    .map_err(OperationError::from_str)?;
+                            }
+
                         }
                         Ok(())
                     })

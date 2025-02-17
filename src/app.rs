@@ -100,7 +100,7 @@ pub enum Action {
     DesktopViewOptions,
     EditHistory,
     EditLocation,
-    EmptyTrash,
+    EmptyTrash(bool),
     #[cfg(feature = "desktop")]
     ExecEntryAction(usize),
     ExtractHere,
@@ -131,6 +131,7 @@ pub enum Action {
     SelectAll,
     SetSort(HeadingOptions, bool),
     Settings,
+    ShredFile,
     TabClose,
     TabNew,
     TabNext,
@@ -164,7 +165,7 @@ impl Action {
             Action::EditLocation => {
                 Message::TabMessage(entity_opt, tab::Message::EditLocationEnable)
             }
-            Action::EmptyTrash => Message::TabMessage(None, tab::Message::EmptyTrash),
+            Action::EmptyTrash(shred) => Message::TabMessage(None, tab::Message::EmptyTrash(*shred)),
             Action::ExtractHere => Message::ExtractHere(entity_opt),
             #[cfg(feature = "desktop")]
             Action::ExecEntryAction(action) => {
@@ -199,6 +200,7 @@ impl Action {
                 Message::TabMessage(entity_opt, tab::Message::SetSort(*sort, *dir))
             }
             Action::Settings => Message::ToggleContextPage(ContextPage::Settings),
+            Action::ShredFile => Message::ShredFile(entity_opt),
             Action::TabClose => Message::TabClose(entity_opt),
             Action::TabNew => Message::TabNew,
             Action::TabNext => Message::TabNext,
@@ -334,6 +336,7 @@ pub enum Message {
     SearchClear,
     SearchInput(String),
     SetShowDetails(bool),
+    ShredFile(Option<Entity>),
     SystemThemeModeChange(cosmic_theme::ThemeMode),
     Size(Size),
     TabActivate(Entity),
@@ -422,7 +425,9 @@ pub enum DialogPage {
         archive_type: ArchiveType,
         password: Option<String>,
     },
-    EmptyTrash,
+    EmptyTrash {
+        shred: bool
+    },
     FailedOperation(u64),
     ExtractPassword {
         id: u64,
@@ -1995,8 +2000,10 @@ impl Application for App {
                                 password,
                             })
                         }
-                        DialogPage::EmptyTrash => {
-                            self.operation(Operation::EmptyTrash);
+                        DialogPage::EmptyTrash {
+                            shred
+                        } => {
+                            self.operation(Operation::EmptyTrash { shred });
                         }
                         DialogPage::FailedOperation(id) => {
                             log::warn!("TODO: retry operation {}", id);
@@ -2159,7 +2166,7 @@ impl Application for App {
             Message::MoveToTrash(entity_opt) => {
                 let paths = self.selected_paths(entity_opt);
                 if !paths.is_empty() {
-                    self.operation(Operation::Delete { paths });
+                    self.operation(Operation::Delete { paths, shred: false });
                 }
             }
             Message::MounterItems(mounter_key, mounter_items) => {
@@ -2571,18 +2578,20 @@ impl Application for App {
                 // Show toast for some operations
                 if let Some((op, _)) = self.pending_operations.remove(&id) {
                     if let Some(description) = op.toast() {
-                        if let Operation::Delete { ref paths } = op {
-                            let paths: Arc<[PathBuf]> = Arc::from(paths.as_slice());
-                            commands.push(
-                                self.toasts
-                                    .push(
-                                        widget::toaster::Toast::new(description)
-                                            .action(fl!("undo"), move |tid| {
-                                                Message::UndoTrash(tid, paths.clone())
-                                            }),
-                                    )
-                                    .map(cosmic::app::Message::App),
-                            );
+                        if let Operation::Delete { ref paths, shred } = op {
+                            if !shred {
+                                let paths: Arc<[PathBuf]> = Arc::from(paths.as_slice());
+                                commands.push(
+                                    self.toasts
+                                        .push(
+                                            widget::toaster::Toast::new(description)
+                                                .action(fl!("undo"), move |tid| {
+                                                    Message::UndoTrash(tid, paths.clone())
+                                                }),
+                                        )
+                                        .map(cosmic::app::Message::App),
+                                );
+                            }
                         }
                     }
                     self.complete_operations.insert(id, op);
@@ -2805,6 +2814,12 @@ impl Application for App {
                 config_set!(show_details, show_details);
                 return self.update_config();
             }
+            Message::ShredFile(entity_opt) => {
+                let paths = self.selected_paths(entity_opt);
+                if !paths.is_empty() {
+                    self.operation(Operation::Delete { paths, shred: true });
+                }
+            }
             Message::SystemThemeModeChange(_theme_mode) => {
                 return self.update_config();
             }
@@ -2938,8 +2953,8 @@ impl Application for App {
                         tab::Command::DropFiles(to, from) => {
                             commands.push(self.update(Message::PasteContents(to, from)));
                         }
-                        tab::Command::EmptyTrash => {
-                            self.dialog_pages.push_back(DialogPage::EmptyTrash);
+                        tab::Command::EmptyTrash(shred) => {
+                            self.dialog_pages.push_back(DialogPage::EmptyTrash { shred });
                         }
                         #[cfg(feature = "desktop")]
                         tab::Command::ExecEntryAction(entry, action) => {
@@ -2953,7 +2968,7 @@ impl Application for App {
                             );
                         }
                         tab::Command::MoveToTrash(paths) => {
-                            self.operation(Operation::Delete { paths });
+                            self.operation(Operation::Delete { paths, shred: false });
                         }
                         tab::Command::OpenFile(path) => self.open_file(&path),
                         tab::Command::OpenInNewTab(path) => {
@@ -3197,7 +3212,7 @@ impl Application for App {
                             },
                         )),
                         Location::Trash if matches!(action, DndAction::Move) => {
-                            self.operation(Operation::Delete { paths: data.paths });
+                            self.operation(Operation::Delete { paths: data.paths, shred: false });
                             Task::none()
                         }
                         _ => {
@@ -3258,7 +3273,7 @@ impl Application for App {
                             },
                         )),
                         Location::Trash if matches!(action, DndAction::Move) => {
-                            self.operation(Operation::Delete { paths: data.paths });
+                            self.operation(Operation::Delete { paths: data.paths, shred: false });
                             Task::none()
                         }
                         _ => {
@@ -3400,7 +3415,7 @@ impl Application for App {
                 }
 
                 NavMenuAction::EmptyTrash => {
-                    self.dialog_pages.push_front(DialogPage::EmptyTrash);
+                    self.dialog_pages.push_front(DialogPage::EmptyTrash { shred: false });
                 }
             },
             Message::Recents => {
@@ -3723,11 +3738,11 @@ impl Application for App {
 
                 dialog
             }
-            DialogPage::EmptyTrash => widget::dialog()
-                .title(fl!("empty-trash"))
-                .body(fl!("empty-trash-warning"))
+            DialogPage::EmptyTrash { shred } => widget::dialog()
+                .title(if *shred { fl!("shred-trash") } else { fl!("empty-trash") })
+                .body(if *shred { fl!("shred-trash-warning") } else { fl!("empty-trash-warning") })
                 .primary_action(
-                    widget::button::suggested(fl!("empty-trash")).on_press(Message::DialogComplete),
+                    widget::button::suggested(if *shred { fl!("shred-trash") } else { fl!("empty-trash") }).on_press(Message::DialogComplete),
                 )
                 .secondary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),

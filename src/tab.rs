@@ -1100,7 +1100,7 @@ pub enum Command {
     AddToSidebar(PathBuf),
     ChangeLocation(String, Location, Option<Vec<PathBuf>>),
     DropFiles(PathBuf, ClipboardPaste),
-    EmptyTrash,
+    EmptyTrash(bool),
     #[cfg(feature = "desktop")]
     ExecEntryAction(cosmic::desktop::DesktopEntryData, usize),
     Iced(TaskWrapper),
@@ -1134,7 +1134,7 @@ pub enum Message {
     EditLocationEnable,
     EditLocationSubmit,
     OpenInNewTab(PathBuf),
-    EmptyTrash,
+    EmptyTrash(bool),
     #[cfg(feature = "desktop")]
     ExecEntryAction(Option<PathBuf>, usize),
     Gallery(bool),
@@ -2473,8 +2473,8 @@ impl Tab {
             Message::OpenInNewTab(path) => {
                 commands.push(Command::OpenInNewTab(path));
             }
-            Message::EmptyTrash => {
-                commands.push(Command::EmptyTrash);
+            Message::EmptyTrash(shred) => {
+                commands.push(Command::EmptyTrash(shred));
             }
             #[cfg(feature = "desktop")]
             Message::ExecEntryAction(path, action) => {
@@ -4538,7 +4538,7 @@ impl Tab {
                             widget::layer_container(widget::row::with_children(vec![
                                 widget::horizontal_space().into(),
                                 widget::button::standard(fl!("empty-trash"))
-                                    .on_press(Message::EmptyTrash)
+                                    .on_press(Message::EmptyTrash(false))
                                     .into(),
                             ]))
                             .padding([space_xxs, space_xs])

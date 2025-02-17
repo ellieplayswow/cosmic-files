@@ -47,6 +47,10 @@ extract-password-required = Password required
 empty-trash = Empty trash
 empty-trash-warning = Are you sure you want to permanently delete all the items in Trash?
 
+## Shred Trash Dialog
+shred-trash = Shred trash
+shred-trash-warning = Are you sure you want to permanently delete all the items in Trash? Shredded files are irrecoverable.
+
 ## Mount Error Dialog
 mount-error = Unable to access drive
 
@@ -211,6 +215,14 @@ restored = Restored {$items} {$items ->
         [one] item
         *[other] items
     } from {trash}
+shredding = Shredding {$items} {$items ->
+        [one] item
+        *[other] items
+    } from "{$from}" ({$progress})...
+shredded = Shredded {$items} {$items ->
+        [one] item
+        *[other] items
+    } from "{$from}"
 unknown-folder = unknown folder
 
 ## Open with
@@ -251,6 +263,7 @@ sort-by-name = Sort by name
 sort-by-modified = Sort by modified
 sort-by-size = Sort by size
 sort-by-trashed = Sort by delete time
+shred-file = Shred file
 
 ## Desktop
 change-wallpaper = Change wallpaper...

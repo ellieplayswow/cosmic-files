@@ -136,7 +136,7 @@ pub fn context_menu<'a>(
             if selected_trash_only {
                 children.push(menu_item(fl!("open"), Action::Open).into());
                 if tab::trash_entries() > 0 {
-                    children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash).into());
+                    children.push(menu_item(fl!("empty-trash"), Action::EmptyTrash(false)).into());
                 }
             } else if let Some(entry) = selected_desktop_entry {
                 children.push(menu_item(fl!("open"), Action::Open).into());
@@ -152,6 +152,7 @@ pub fn context_menu<'a>(
                 children.push(menu_item(fl!("copy"), Action::Copy).into());
                 // Should this simply bypass trash and remove the shortcut?
                 children.push(menu_item(fl!("move-to-trash"), Action::MoveToTrash).into());
+                children.push(menu_item(fl!("shred-file"), Action::ShredFile).into());
             } else if selected > 0 {
                 if selected_dir == 1 && selected == 1 || selected_dir == 0 {
                     children.push(menu_item(fl!("open"), Action::Open).into());
@@ -212,6 +213,7 @@ pub fn context_menu<'a>(
                 }
                 children.push(divider::horizontal::light().into());
                 children.push(menu_item(fl!("move-to-trash"), Action::MoveToTrash).into());
+                children.push(menu_item(fl!("shred-file"), Action::ShredFile).into());
             } else {
                 //TODO: need better designs for menu with no selection
                 //TODO: have things like properties but they apply to the folder?
@@ -538,6 +540,7 @@ pub fn menu_bar<'a>(
                     menu_button_optional(fl!("add-to-sidebar"), Action::AddToSidebar, selected > 0),
                     menu::Item::Divider,
                     menu_button_optional(fl!("move-to-trash"), Action::MoveToTrash, selected > 0),
+                    menu_button_optional(fl!("shred-file"), Action::ShredFile, selected > 0),
                     menu::Item::Divider,
                     menu::Item::Button(fl!("close-tab"), None, Action::TabClose),
                     menu::Item::Button(fl!("quit"), None, Action::WindowClose),
